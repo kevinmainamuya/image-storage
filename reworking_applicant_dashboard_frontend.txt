@@ -1,0 +1,1335 @@
+// FRONTEND
+<!-- Applicant Dashboard -->
+<section id="applicantDashboard" style="display:none;">
+  <div class="container">
+    <!-- Header with welcome message and actions -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <div>
+        <h2><i class="bi bi-speedometer2"></i> My Dashboard</h2>
+        <p class="text-muted">Welcome, <span id="applicantUserName"></span></p>
+      </div>
+      <div>
+        <button class="btn btn-success" onclick="showSection('jobs')">
+          <i class="bi bi-plus-circle"></i> Browse Jobs
+        </button>
+      </div>
+    </div>
+
+    <!-- Status Cards -->
+    <div class="row mb-4" id="applicantStatusCards">
+      <!-- Will be populated by JavaScript -->
+    </div>
+
+    <!-- Alert Messages -->
+    <div id="applicantDashboardAlert" class="alert" style="display:none;"></div>
+
+    <!-- States Container -->
+    <div id="applicantDashboardStates">
+      <!-- Loading State -->
+      <div id="applicationsLoading" class="text-center py-4" style="display:none;">
+        <div class="spinner-border text-primary" role="status">
+          <span class="visually-hidden">Loading...</span>
+        </div>
+        <p class="mt-2">Loading your applications...</p>
+      </div>
+      
+      <!-- Empty State -->
+      <div id="applicationsEmpty" class="alert alert-info" style="display:none;">
+        <div class="text-center">
+          <i class="bi bi-inbox display-4 mb-3"></i>
+          <h4>No Applications Yet</h4>
+          <p>You have not applied for any jobs yet. Start your career journey today!</p>
+          <button onclick="showSection('jobs')" class="btn btn-primary mt-2">
+            Browse Available Jobs
+          </button>
+        </div>
+      </div>
+      
+      <!-- Error State -->
+      <div id="applicationsError" class="alert alert-danger" style="display:none;">
+        <div class="text-center">
+          <i class="bi bi-exclamation-triangle display-4 mb-3"></i>
+          <h4>Oops, something went wrong!</h4>
+          <p id="applicationsErrorMessage">Error loading applications</p>
+          <button onclick="loadApplicantDashboardData()" class="btn btn-warning mt-2">
+            <i class="bi bi-arrow-clockwise"></i> Try Again
+          </button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Applications List -->
+    <div id="applicationsList" style="display:none;">
+      <h3 class="mb-3">My Applications</h3>
+      <div class="row">
+        <!-- Will be populated by JavaScript -->
+      </div>
+    </div>
+    
+    <!-- Application Details Modal -->
+    <div class="modal fade" id="applicationDetailsModal" tabindex="-1" aria-labelledby="applicationDetailsModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="applicationDetailsModalLabel">Application Details</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body" id="applicationDetailsContent">
+            <div class="text-center">
+              <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+              </div>
+              <p class="mt-2">Loading application details...</p>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            <button type="button" class="btn btn-danger" id="withdrawApplicationBtn" style="display:none;">
+              Withdraw Application
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+// FRONTEND SCRIPTS
+
+function hideAllSections() {
+  // Get all sections and hide them
+  const sections = document.querySelectorAll('section');
+  sections.forEach(section => {
+    section.style.display = 'none';
+  });
+}
+
+// Applicant Dashboard Frontend Scripts
+
+// Global state for applicant dashboard
+const applicantDashboardState = {
+  userData: null,
+  applications: [],
+  currentApplication: null,
+  emailAddresses: [] // To store all email addresses associated with the user
+};
+
+// Dashboard Navigation Functions
+function showApplicantDashboard() {
+  // Hide all sections first
+  hideAllSections();
+  
+  // Show applicant dashboard
+  document.getElementById('applicantDashboard').style.display = 'block';
+  
+  // Load applicant data
+  loadApplicantDashboardData();
+}
+
+// Applicant Dashboard Data Loading Functions
+function loadApplicantDashboardData() {
+  // Reset any existing alerts
+  showApplicantDashboardAlert('', '');
+  
+  // Show loading states
+  document.getElementById('applicationsLoading').style.display = 'block';
+  document.getElementById('applicationsEmpty').style.display = 'none';
+  document.getElementById('applicationsError').style.display = 'none';
+  document.getElementById('applicationsList').style.display = 'none';
+  
+  const user = window.user || {}; // Get user from global state
+  
+  if (!user.email) {
+    console.error("User data not available");
+    showApplicationsError({ message: "User session expired. Please login again." });
+    return;
+  }
+  
+  // Set user data in our local state
+  applicantDashboardState.userData = user;
+  
+  // Load user applications with the dedicated function
+  google.script.run
+    .withSuccessHandler(handleDashboardDataSuccess)
+    .withFailureHandler(handleDashboardDataError)
+    .getApplicantDashboardData(user.email);
+}
+
+function handleDashboardDataSuccess(response) {
+  // Hide loading state
+  document.getElementById('applicationsLoading').style.display = 'none';
+  
+  if (!response.success) {
+    showApplicationsError({ message: response.error || "Failed to load dashboard data." });
+    return;
+  }
+  
+  // Update user name
+  if (response.user && response.user.name) {
+    const userNameEl = document.getElementById('applicantUserName');
+    if (userNameEl) {
+      userNameEl.textContent = response.user.name;
+    }
+    // Update global state
+    applicantDashboardState.userData = response.user;
+  }
+  
+  // Store all applications in state
+  applicantDashboardState.applications = response.applications || [];
+  
+  const summary = response.summary || {};
+  
+  if (applicantDashboardState.applications.length === 0) {
+    // Show empty state
+    document.getElementById('applicationsEmpty').style.display = 'block';
+  } else {
+    // Process and display applications
+    renderApplicantStatusCards(summary);
+    renderApplicantApplications(applicantDashboardState.applications);
+    document.getElementById('applicationsList').style.display = 'block';
+  }
+  
+  // Extract all email addresses associated with the user
+  const loginEmail = applicantDashboardState.userData.email;
+  const applicationEmails = new Set(applicantDashboardState.applications.map(app => app.applicantEmail));
+  applicationEmails.add(loginEmail);
+  applicantDashboardState.emailAddresses = Array.from(applicationEmails);
+}
+
+/**
+function handleDashboardDataError(error) {
+  showApplicationsError(error);
+}
+*/
+
+function handleDashboardDataError(error) {
+  console.error("Dashboard data error:", error);
+  
+  let errorMessage = "An error occurred while loading your dashboard data";
+  if (error && error.message) {
+    if (error.message.includes("User not found")) {
+      errorMessage = "Your account information could not be found. Please contact support.";
+    } else if (error.message.includes("permission") || error.message.includes("access")) {
+      errorMessage = "You don't have permission to access this data. Please login again.";
+    } else {
+      errorMessage = error.message;
+    }
+  }
+  
+  showApplicationsError({ 
+    message: errorMessage,
+    details: error.details || ""
+  });
+}
+
+function showApplicationsError(error) {
+  // Hide loading state, show error state
+  document.getElementById('applicationsLoading').style.display = 'none';
+  document.getElementById('applicationsError').style.display = 'block';
+  
+  // Update error message
+  const errorMsgEl = document.getElementById('applicationsErrorMessage');
+  if (errorMsgEl) {
+    errorMsgEl.textContent = error.message || "An unexpected error occurred.";
+  }
+}
+
+// Alert Functions
+function showApplicantDashboardAlert(message, type) {
+  const alertDiv = document.getElementById('applicantDashboardAlert');
+  if (!alertDiv) return;
+  
+  if (!message) {
+    alertDiv.style.display = 'none';
+    return;
+  }
+  
+  alertDiv.className = `alert alert-${type || 'info'}`;
+  alertDiv.innerHTML = message;
+  alertDiv.style.display = 'block';
+  
+  // Auto-hide after some time if it's a success message
+  if (type === 'success') {
+    setTimeout(() => {
+      alertDiv.style.display = 'none';
+    }, 5000);
+  }
+}
+
+
+function renderApplicantStatusCards(summary) {
+  const cardsDiv = document.getElementById('applicantStatusCards');
+  if (!cardsDiv) return;
+  
+  const cards = [
+    { 
+      title: 'Total', 
+      count: summary.total || 0, 
+      icon: 'bi-file-earmark-text', 
+      color: 'primary' 
+    },
+    { 
+      title: 'Pending', 
+      count: summary.pending || 0, 
+      icon: 'bi-hourglass-split', 
+      color: 'info' 
+    },
+    { 
+      title: 'Under Review', 
+      count: summary.underReview || 0, 
+      icon: 'bi-search', 
+      color: 'primary' 
+    },
+    { 
+      title: 'Shortlisted', 
+      count: summary.shortlisted || 0, 
+      icon: 'bi-list-check', 
+      color: 'success' 
+    },
+    { 
+      title: 'Interview', 
+      count: summary.interviewScheduled || 0, 
+      icon: 'bi-person-video', 
+      color: 'warning' 
+    },
+    { 
+      title: 'Hired', 
+      count: summary.hired || 0, 
+      icon: 'bi-check-circle', 
+      color: 'dark' 
+    },
+    { 
+      title: 'Rejected', 
+      count: summary.rejected || 0, 
+      icon: 'bi-x-circle', 
+      color: 'danger' 
+    }
+  ];
+  
+  cardsDiv.innerHTML = cards.map(card => `
+    <div class="col-md-4 col-lg-2 mb-3">
+      <div class="card text-white bg-${card.color} h-100">
+        <div class="card-body text-center">
+          <i class="bi ${card.icon} display-4"></i>
+          <h3 class="card-title mt-2">${card.count}</h3>
+          <p class="card-text">${card.title}</p>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+
+function renderApplicantApplications(applications) {
+  const applicationsListDiv = document.getElementById('applicationsList');
+  if (!applicationsListDiv) return;
+  
+  const applicationsContainer = applicationsListDiv.querySelector('.row');
+  if (!applicationsContainer) return;
+  
+  // Sort applications by submission date (most recent first)
+  applications.sort((a, b) => {
+    const dateA = new Date(a.applicationDate || '1970-01-01');
+    const dateB = new Date(b.applicationDate || '1970-01-01');
+    return dateB - dateA;
+  });
+  
+  // Build HTML for applications
+  let applicationsHTML = '';
+  
+  applications.forEach(app => {
+    // Determine status badge color
+    let statusColor = getBadgeColorForStatus(app.status);
+    
+    // Format dates nicely
+    const applicationDate = app.applicationDate ? formatDateForDisplay(app.applicationDate) : 'Unknown';
+    const deadline = app.deadline ? formatDateForDisplay(app.deadline) : 'No deadline';
+    
+    applicationsHTML += `
+      <div class="col-md-6 col-lg-4 mb-4">
+        <div class="card h-100 application-card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span class="badge bg-${statusColor}">${app.status || 'Pending'}</span>
+            <small class="text-muted">Applied: ${applicationDate}</small>
+          </div>
+          <div class="card-body">
+            <h5 class="card-title">${app.jobTitle || 'Unknown Position'}</h5>
+            <h6 class="card-subtitle mb-2 text-muted">${app.department || 'Unknown Department'}</h6>
+            <p class="card-text">
+              ${app.description ? truncateText(app.description, 100) : 'No description available'}
+            </p>
+            <div class="d-flex justify-content-between align-items-center">
+              <small class="text-muted">Deadline: ${deadline}</small>
+              ${app.rating ? `<div class="rating-stars">${renderStarRating(app.rating)}</div>` : ''}
+            </div>
+          </div>
+          <div class="card-footer bg-transparent">
+            <button class="btn btn-sm btn-primary w-100" onclick="viewApplicantDashboardDetails('${app.applicationId}')">
+              View Details
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  });
+  
+  applicationsContainer.innerHTML = applicationsHTML;
+}
+
+// Helper Functions
+function formatDateForDisplay(dateStr) {
+  try {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  } catch (e) {
+    return dateStr;
+  }
+}
+
+function truncateText(text, maxLength) {
+  if (!text) return '';
+  if (text.length <= maxLength) return text;
+  return text.substring(0, maxLength) + '...';
+}
+
+
+/**
+ * Get color class for status badge
+ * @param {string} status - Application status
+ * @return {string} Bootstrap color class
+ */
+function getBadgeColorForStatus(status) {
+  if (!status) return 'secondary';
+  
+  const statusLower = status.toLowerCase();
+  
+  const colorMap = {
+    'pending': 'warning',
+    'under review': 'info',
+    'shortlisted': 'primary',
+    'interview scheduled': 'info',
+    'interviewed': 'info',
+    'offered': 'success',
+    'hired': 'success',
+    'rejected': 'danger',
+    'withdrawn': 'secondary'
+  };
+  
+  return colorMap[statusLower] || 'secondary';
+}
+
+
+function renderStarRating(rating) {
+  const maxRating = 5;
+  const ratingNum = Number(rating) || 0;
+  let stars = '';
+  
+  for (let i = 1; i <= maxRating; i++) {
+    if (i <= ratingNum) {
+      stars += '<i class="bi bi-star-fill text-warning"></i>';
+    } else if (i - 0.5 <= ratingNum) {
+      stars += '<i class="bi bi-star-half text-warning"></i>';
+    } else {
+      stars += '<i class="bi bi-star text-warning"></i>';
+    }
+  }
+  
+  return stars;
+}
+
+
+// Frontend JavaScript
+const OFFICIAL_APPLICATION_STATUSES = [
+  "Pending",
+  "Under Review", 
+  "Shortlisted",
+  "Rejected",
+  "Interview Scheduled",
+  "Hired"
+];
+
+function getStandardizedStatus(status) {
+  if (!status) return 'Pending';
+  
+  // Check if already official status
+  if (OFFICIAL_APPLICATION_STATUSES.includes(status)) {
+    return status;
+  }
+  
+  // Map legacy statuses (must match backend exactly)
+  const statusMap = {
+    'pending': 'Pending',
+    'under review': 'Under Review',
+    'shortlisted': 'Shortlisted',
+    'interviewed': 'Interview Scheduled',
+    'rejected': 'Rejected',
+    'hired': 'Hired',
+    'offered': 'Hired'
+  };
+  
+  return statusMap[status.toLowerCase()] || 'Pending';
+}
+
+
+function viewApplicantDashboardDetails(applicationId) {
+  // Set current application in state
+  applicantDashboardState.currentApplication = applicationId;
+  
+  // Reset modal content
+  const modalContent = document.getElementById('applicationDetailsContent');
+  modalContent.innerHTML = `
+    <div class="text-center py-4">
+      <div class="spinner-border" role="status">
+        <span class="visually-hidden">Loading...</span>
+      </div>
+      <p class="mt-2">Loading application details...</p>
+    </div>`;
+  
+  // Show modal
+  const modal = new bootstrap.Modal(document.getElementById('applicationDetailsModal'));
+  modal.show();
+  
+  // Find application in local state to get email
+  const app = applicantDashboardState.applications.find(
+    a => a.applicationId === applicationId
+  );
+  
+  // Use the most appropriate email - prioritize login email from application record
+  const emailToUse = app?.loginEmail || applicantDashboardState.userData.email;
+  
+  // Call backend
+  google.script.run
+    .withSuccessHandler(displayApplicationDetails)
+    .withFailureHandler(handleApplicationDetailsError)
+    .getApplicantApplicationDetails(applicationId, emailToUse);
+}
+
+
+function displayApplicationDetails(response) {
+  const modalContent = document.getElementById('applicationDetailsContent');
+  
+  try {
+    // Debug: Log the exact response structure
+    console.group("Backend Response Analysis");
+    console.log("Full response object:", response);
+    console.log("Response type:", typeof response);
+    console.log("Stringified response:", JSON.stringify(response));
+    console.groupEnd();
+
+    // Validate response exists
+    if (!response) {
+      throw new Error("No response received from server");
+    }
+
+    // Validate response structure
+    if (typeof response.success === 'undefined') {
+      throw new Error("Invalid response format - missing 'success' property");
+    }
+
+    if (!response.success) {
+      throw new Error(response.error || "Unknown error occurred");
+    }
+
+    if (!response.data || typeof response.data !== 'object') {
+      throw new Error("Invalid response format - missing 'data' object");
+    }
+
+    // Extract all data with null checks
+    const { 
+      application = {}, 
+      job = {}, 
+      personalInfo = {}, 
+      academicQualifications = [], 
+      professionalQualifications = [], 
+      employmentHistory = [], 
+      referees = [] 
+    } = response.data;
+
+    // Date formatting helper
+    const formatDate = (dateStr) => {
+      if (!dateStr) return 'Not specified';
+      try {
+        const date = new Date(dateStr);
+        return isNaN(date.getTime()) ? dateStr : date.toLocaleDateString('en-GB');
+      } catch (e) {
+        return dateStr;
+      }
+    };
+
+    // Currency formatting helper
+    const formatCurrency = (amount) => {
+      if (!amount) return 'Not specified';
+      try {
+        return new Intl.NumberFormat('en-KE', {
+          style: 'currency',
+          currency: 'KES',
+          minimumFractionDigits: 0
+        }).format(amount);
+      } catch (e) {
+        return amount;
+      }
+    };
+
+    // Status color mapping
+    const statusColor = getStatusColor(application.status);
+
+    // Start building HTML content
+    let contentHTML = `
+      <div class="application-details">
+        <!-- Application Header -->
+        <div class="card mb-3">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h4>${job.Title || 'No title specified'}</h4>
+              <span class="badge bg-${statusColor}">
+                ${application.status || 'Status unknown'}
+              </span>
+            </div>
+            <div class="row">
+              <div class="col-md-6">
+                <p><strong>Department:</strong> ${job.Department || 'Not specified'}</p>
+                <p><strong>Applied:</strong> ${formatDate(application.submissionDate)}</p>
+              </div>
+              <div class="col-md-6">
+                <p><strong>Deadline:</strong> ${formatDate(job.ApplicationDeadline)}</p>
+                <p><strong>Application Email:</strong> ${application.applicantEmail || 'Not specified'}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Job Details -->
+        <div class="card mb-3">
+          <div class="card-header bg-light">
+            <h5 class="mb-0">Job Details</h5>
+          </div>
+          <div class="card-body">
+            ${job.Description ? `<p>${job.Description}</p>` : '<p class="text-muted">No description provided</p>'}
+            ${job.Requirements ? `<div class="mt-3"><h6>Requirements</h6><p>${job.Requirements.replace(/\n/g, '<br>')}</p></div>` : ''}
+            ${job.Responsibilities ? `<div class="mt-3"><h6>Responsibilities</h6><p>${job.Responsibilities.replace(/\n/g, '<br>')}</p></div>` : ''}
+            ${job.SalaryRange ? `<div class="mt-3"><h6>Salary Range</h6><p>${job.SalaryRange}</p></div>` : ''}
+          </div>
+        </div>
+
+        <!-- Personal Information -->
+        <div class="card mb-3">
+          <div class="card-header bg-light">
+            <h5 class="mb-0">Personal Information</h5>
+          </div>
+          <div class="card-body">
+            <div class="row">
+              <!-- Basic Information -->
+              <div class="col-md-6">
+                <h6>Basic Information</h6>
+                <p><strong>Full Name:</strong> ${personalInfo.FullName || 'Not specified'}</p>
+                <p><strong>Title:</strong> ${personalInfo.Title || 'Not specified'}</p>
+                <p><strong>Date of Birth:</strong> ${formatDate(personalInfo.DateOfBirth)}</p>
+                <p><strong>ID Number:</strong> ${personalInfo.IDNumber || 'Not specified'}</p>
+                <p><strong>Gender:</strong> ${personalInfo.Gender || 'Not specified'}</p>
+                <p><strong>Nationality:</strong> ${personalInfo.Nationality || 'Not specified'}</p>
+              </div>
+              
+              <!-- Contact Information -->
+              <div class="col-md-6">
+                <h6>Contact Information</h6>
+                <p><strong>Mobile:</strong> ${personalInfo.Mobile || 'Not specified'}</p>
+                <p><strong>Email:</strong> ${personalInfo.Email || 'Not specified'}</p>
+                <p><strong>Postal Address:</strong> ${personalInfo.PostalAddress || 'Not specified'}</p>
+                <p><strong>Postal Code:</strong> ${personalInfo.PostalCode || 'Not specified'}</p>
+                <p><strong>Town/City:</strong> ${personalInfo.TownCity || 'Not specified'}</p>
+              </div>
+            </div>
+            
+            <!-- Current Employment -->
+            ${personalInfo.CurrentEmploymentType ? `
+            <div class="mt-4">
+              <h6>Current Employment</h6>
+              <div class="row">
+                <div class="col-md-6">
+                  <p><strong>Employment Type:</strong> ${personalInfo.CurrentEmploymentType}</p>
+                  ${personalInfo.CurrentEmployer ? `<p><strong>Employer:</strong> ${personalInfo.CurrentEmployer}</p>` : ''}
+                  ${personalInfo.PositionHeld ? `<p><strong>Position:</strong> ${personalInfo.PositionHeld}</p>` : ''}
+                </div>
+                <div class="col-md-6">
+                  ${personalInfo.EffectiveDate ? `<p><strong>Start Date:</strong> ${formatDate(personalInfo.EffectiveDate)}</p>` : ''}
+                  ${personalInfo.GrossSalary ? `<p><strong>Salary:</strong> ${formatCurrency(personalInfo.GrossSalary)}</p>` : ''}
+                </div>
+              </div>
+            </div>` : ''}
+          </div>
+        </div>
+
+        <!-- Academic Qualifications -->
+        <div class="card mb-3">
+          <div class="card-header bg-light">
+            <h5 class="mb-0">Academic Qualifications</h5>
+          </div>
+          <div class="card-body">
+            ${academicQualifications.length > 0 ? `
+            <div class="table-responsive">
+              <table class="table table-striped">
+                <thead>
+                  <tr>
+                    <th>Period</th>
+                    <th>Institution</th>
+                    <th>Program</th>
+                    <th>Award</th>
+                    <th>Grade</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${academicQualifications.map(q => `
+                    <tr>
+                      <td>${q.YearFrom || ''} - ${q.YearTo || 'Present'}</td>
+                      <td>${q.Institution || ''}</td>
+                      <td>${q.CourseProgramme || ''}</td>
+                      <td>${q.Award || ''}</td>
+                      <td>${q.ClassGrade || ''}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+            ` : '<p class="text-muted">No academic qualifications provided</p>'}
+          </div>
+        </div>
+
+        <!-- Professional Qualifications -->
+        <div class="card mb-3">
+          <div class="card-header bg-light">
+            <h5 class="mb-0">Professional Qualifications</h5>
+          </div>
+          <div class="card-body">
+            ${professionalQualifications.length > 0 ? `
+            <div class="table-responsive">
+              <table class="table table-striped">
+                <thead>
+                  <tr>
+                    <th>Period</th>
+                    <th>Institution</th>
+                    <th>Program</th>
+                    <th>Specialization</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${professionalQualifications.map(q => `
+                    <tr>
+                      <td>${q.YearFrom || ''} - ${q.YearTo || 'Present'}</td>
+                      <td>${q.Institution || ''}</td>
+                      <td>${q.Award || ''}</td>
+                      <td>${q.Specialization || ''}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+            ` : '<p class="text-muted">No professional qualifications provided</p>'}
+          </div>
+        </div>
+
+        <!-- Employment History -->
+        <div class="card mb-3">
+          <div class="card-header bg-light">
+            <h5 class="mb-0">Employment History</h5>
+          </div>
+          <div class="card-body">
+            ${employmentHistory.length > 0 ? `
+            <div class="table-responsive">
+              <table class="table table-striped">
+                <thead>
+                  <tr>
+                    <th>Period</th>
+                    <th>Employer</th>
+                    <th>Position</th>
+                    <th>Salary</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${employmentHistory.map(job => `
+                    <tr>
+                      <td>${job.YearFrom || ''} - ${job.YearTo || 'Present'}</td>
+                      <td>${job.MinistryInstitution || ''}</td>
+                      <td>${job.Designation || ''}</td>
+                      <td>${job.GrossSalary ? formatCurrency(job.GrossSalary) : ''}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+            ` : '<p class="text-muted">No employment history provided</p>'}
+          </div>
+        </div>
+
+        <!-- Referees -->
+        <div class="card mb-3">
+          <div class="card-header bg-light">
+            <h5 class="mb-0">Referees</h5>
+          </div>
+          <div class="card-body">
+            ${referees.length > 0 ? `
+            <div class="row">
+              ${referees.map(ref => `
+                <div class="col-md-6 mb-3">
+                  <div class="card h-100">
+                    <div class="card-body">
+                      <h6>${ref.FullName || 'Referee'}</h6>
+                      <p><strong>Occupation:</strong> ${ref.Occupation || ''}</p>
+                      <p><strong>Contact:</strong></p>
+                      <ul class="list-unstyled">
+                        ${ref.MobileNo ? `<li><i class="bi bi-phone"></i> ${ref.MobileNo}</li>` : ''}
+                        ${ref.Email ? `<li><i class="bi bi-envelope"></i> ${ref.Email}</li>` : ''}
+                      </ul>
+                      <p><strong>Known Period:</strong> ${ref.PeriodKnown || ''}</p>
+                    </div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+            ` : '<p class="text-muted">No referees provided</p>'}
+          </div>
+        </div>
+      </div>`;
+
+    // Update modal content
+    modalContent.innerHTML = contentHTML;
+
+    // Update withdraw button if exists
+    const withdrawBtn = document.getElementById('withdrawApplicationBtn');
+    if (withdrawBtn) {
+      const normalizedStatus = (application.status || '').toLowerCase();
+      withdrawBtn.style.display = ['rejected', 'withdrawn', 'hired'].includes(normalizedStatus) 
+        ? 'none' 
+        : 'block';
+    }
+
+  } catch (error) {
+    console.error("Failed to display application details:", {
+      error: error,
+      response: response
+    });
+
+    modalContent.innerHTML = `
+      <div class="alert alert-danger">
+        <i class="bi bi-exclamation-triangle"></i>
+        <strong>Error Loading Details</strong>
+        <p>${error.message}</p>
+        <button class="btn btn-sm btn-outline-secondary mt-2" onclick="viewApplicantDashboardDetails('${applicantDashboardState.currentApplication}')">
+          Try Again
+        </button>
+      </div>`;
+  }
+}
+
+
+function updateWithdrawButton(status) {
+  const withdrawBtn = document.getElementById('withdrawApplicationBtn');
+  if (!withdrawBtn) return;
+
+  const normalizedStatus = (status || '').toLowerCase();
+  const nonWithdrawableStatuses = ['rejected', 'offered', 'withdrawn', 'hired'];
+  
+  withdrawBtn.style.display = nonWithdrawableStatuses.includes(normalizedStatus) ? 'none' : 'block';
+  
+  if (withdrawBtn.style.display === 'block') {
+    withdrawBtn.onclick = () => confirmWithdrawal(applicantDashboardState.currentApplication);
+  }
+}
+
+function formatDate(date) {
+  if (!date) return 'N/A';
+  try {
+    return date.toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    });
+  } catch (e) {
+    return 'Invalid Date';
+  }
+}
+
+
+
+/**
+ * Gets CSS class for status badge color
+ * @param {string} status - Application status
+ * @return {string} Bootstrap background color class
+ */
+function getStatusColor(status) {
+  if (!status) return 'secondary';
+  
+  const normalizedStatus = status.toLowerCase().trim();
+  
+  const statusMap = {
+    'pending': 'info',
+    'under review': 'primary',
+    'shortlisted': 'success',
+    'rejected': 'danger',
+    'interview scheduled': 'warning',
+    'hired': 'dark',
+    'withdrawn': 'secondary'
+  };
+  
+  return statusMap[normalizedStatus] || 'secondary';
+}
+
+
+/**
+ * Shows a styled modal confirmation for application withdrawal
+ * @param {string} applicationId - ID of application to withdraw
+ */
+function confirmWithdrawal(applicationId) {
+  if (!applicationId) return;
+
+  // Create modal HTML dynamically
+  const modalHTML = `
+    <div class="modal fade" id="withdrawConfirmModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header bg-warning">
+            <h5 class="modal-title">Confirm Withdrawal</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <p>Are you sure you want to withdraw this application?</p>
+            <p class="text-danger"><strong>This action cannot be undone.</strong></p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="button" class="btn btn-danger" id="confirmWithdrawBtn">Withdraw Application</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Inject modal into DOM
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+  
+  // Initialize modal
+  const modalEl = document.getElementById('withdrawConfirmModal');
+  const modal = new bootstrap.Modal(modalEl);
+  modal.show();
+
+  // Handle confirmation
+  document.getElementById('confirmWithdrawBtn').addEventListener('click', () => {
+    const withdrawBtn = document.getElementById('withdrawApplicationBtn');
+    const originalBtnText = withdrawBtn.innerHTML;
+    
+    // Show processing state
+    withdrawBtn.innerHTML = `
+      <span class="spinner-border spinner-border-sm" role="status"></span> Processing...
+    `;
+    withdrawBtn.disabled = true;
+    
+    modal.hide();
+
+    // Execute withdrawal
+    google.script.run
+      .withSuccessHandler(() => {
+        // Refresh dashboard on success
+        showMessage('Application withdrawn successfully', 'success');
+        loadApplicantDashboardData();
+      })
+      .withFailureHandler(error => {
+        showMessage(`Withdrawal failed: ${error.message}`, 'danger');
+        withdrawBtn.innerHTML = originalBtnText;
+        withdrawBtn.disabled = false;
+      })
+      .withdrawApplication(applicationId, window.user.email);
+  });
+
+  // Cleanup modal after hide
+  modalEl.addEventListener('hidden.bs.modal', () => {
+    modalEl.remove();
+  });
+}
+
+
+function handleApplicationDetailsError(error) {
+  const modalContent = document.getElementById('applicationDetailsContent');
+  
+  let errorMessage = "An error occurred while loading application details";
+  if (error && error.message) {
+    errorMessage = error.message;
+  }
+  
+  modalContent.innerHTML = `
+    <div class="alert alert-danger">
+      <i class="bi bi-exclamation-triangle"></i>
+      <strong>Error Loading Details</strong>
+      <p>${errorMessage}</p>
+    </div>
+    <div class="text-center mt-3">
+      <button class="btn btn-primary" onclick="viewApplicantDashboardDetails('${applicantDashboardState.currentApplication}')">
+        <i class="bi bi-arrow-clockwise"></i> Try Again
+      </button>
+      <button class="btn btn-secondary ms-2" onclick="loadApplicantDashboardData()">
+        <i class="bi bi-arrow-left"></i> Back to Dashboard
+      </button>
+    </div>`;
+}
+
+
+// Functions to render application details sections
+
+// Helper rendering functions
+// ========== RENDERING FUNCTIONS ========== //
+
+function renderPersonalInfoSection(personalInfo) {
+  if (!personalInfo || Object.keys(personalInfo).length === 0) {
+    return '<div class="alert alert-info">Personal information not available</div>';
+  }
+  
+  let html = '<div class="row">';
+  
+  // Basic Info
+  const basicFields = ['FullName', 'Title', 'DateOfBirth', 'IDNumber', 'Gender', 'Nationality'];
+  basicFields.forEach(field => {
+    if (personalInfo[field]) {
+      html += `
+        <div class="col-md-6 mb-2">
+          <strong>${field.replace(/([A-Z])/g, ' $1').trim()}:</strong> ${personalInfo[field]}
+        </div>`;
+    }
+  });
+  
+  // Contact Info
+  html += '</div><div class="row mt-3">';
+  const contactFields = ['PostalAddress', 'PostalCode', 'TownCity', 'Telephone', 'Mobile', 'Email'];
+  contactFields.forEach(field => {
+    if (personalInfo[field]) {
+      html += `
+        <div class="col-md-6 mb-2">
+          <strong>${field.replace(/([A-Z])/g, ' $1').trim()}:</strong> ${personalInfo[field]}
+        </div>`;
+    }
+  });
+  
+  html += '</div>';
+  return html;
+}
+
+function renderQualificationsTable(qualifications) {
+  if (!qualifications || qualifications.length === 0) {
+    return '<div class="alert alert-info">No qualifications recorded</div>';
+  }
+  
+  return `
+    <div class="table-responsive">
+      <table class="table table-striped table-bordered">
+        <thead>
+          <tr>
+            <th>Period</th>
+            <th>Institution</th>
+            <th>Course/Program</th>
+            <th>Award/Specialization</th>
+            <th>Class/Grade</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${qualifications.map(qual => `
+            <tr>
+              <td>${qual.YearFrom || ''} - ${qual.YearTo || 'Present'}</td>
+              <td>${qual.Institution || ''}</td>
+              <td>${qual.CourseProgramme || qual.Award || ''}</td>
+              <td>${qual.Specialization || ''}</td>
+              <td>${qual.ClassGrade || ''}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function renderEmploymentHistoryTable(history) {
+  if (!history || history.length === 0) {
+    return '<div class="alert alert-info">No employment history recorded</div>';
+  }
+  
+  return `
+    <div class="table-responsive">
+      <table class="table table-striped table-bordered">
+        <thead>
+          <tr>
+            <th>Period</th>
+            <th>Designation</th>
+            <th>Institution/Ministry</th>
+            <th>Job Group</th>
+            <th>Gross Salary</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${history.map(job => `
+            <tr>
+              <td>${job.YearFrom || ''} - ${job.YearTo || 'Present'}</td>
+              <td>${job.Designation || ''}</td>
+              <td>${job.MinistryInstitution || ''}</td>
+              <td>${job.JobGroup || ''}</td>
+              <td>${job.GrossSalary ? formatCurrency(job.GrossSalary) : ''}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function renderRefereesTable(referees) {
+  if (!referees || referees.length === 0) {
+    return '<div class="alert alert-info">No referees recorded</div>';
+  }
+  
+  return `
+    <div class="table-responsive">
+      <table class="table table-striped table-bordered">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Occupation</th>
+            <th>Contact</th>
+            <th>Period Known</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${referees.map(referee => `
+            <tr>
+              <td>${referee.FullName || ''}</td>
+              <td>${referee.Occupation || ''}</td>
+              <td>
+                ${referee.Email ? `<div><i class="bi bi-envelope"></i> ${referee.Email}</div>` : ''}
+                ${referee.MobileNo ? `<div><i class="bi bi-phone"></i> ${referee.MobileNo}</div>` : ''}
+                ${referee.Address ? `<div><i class="bi bi-geo-alt"></i> ${referee.Address}</div>` : ''}
+              </td>
+              <td>${referee.PeriodKnown || ''}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+
+
+/**
+ * Format a date for display
+ * @param {string|Date} date - Date to format
+ * @return {string} Formatted date string
+ */
+function formatDate(date) {
+  if (!date) return 'N/A';
+  
+  try {
+    // If it's already a string in the desired format, return it
+    if (typeof date === 'string' && /\d{2}\/\d{2}\/\d{4}/.test(date)) {
+      return date;
+    }
+    
+    // Otherwise convert to Date object and format
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return 'Invalid Date';
+    
+    return d.toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    });
+  } catch (error) {
+    console.error('Error formatting date:', error);
+    return String(date);
+  }
+}
+
+/**
+ * Format currency values
+ * @param {string|number} amount - Amount to format
+ * @return {string} Formatted currency string
+ */
+function formatCurrency(amount) {
+  if (!amount) return 'N/A';
+  
+  try {
+    const value = typeof amount === 'string' ? parseFloat(amount) : amount;
+    return value.toLocaleString('en-US', {
+      style: 'currency',
+      currency: 'KES',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    });
+  } catch (error) {
+    console.error('Error formatting currency:', error);
+    return String(amount);
+  }
+}
+
+
+function withdrawApplication(applicationId) {
+  // Show loading state in the button
+  const withdrawBtn = document.getElementById('withdrawApplicationBtn');
+  const originalButtonText = withdrawBtn.innerHTML;
+  withdrawBtn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Withdrawing...`;
+  withdrawBtn.disabled = true;
+  
+  // Call the server function
+  google.script.run
+    .withSuccessHandler(response => handleWithdrawalSuccess(response, applicationId))
+    .withFailureHandler(error => handleWithdrawalError(error, withdrawBtn, originalButtonText))
+    .withdrawApplication(applicationId, applicantDashboardState.userData.email);
+}
+
+function handleWithdrawalSuccess(response, applicationId) {
+  // Close the modal
+  bootstrap.Modal.getInstance(document.getElementById('applicationDetailsModal')).hide();
+  
+  if (response.success) {
+    // Show success message
+    showApplicantDashboardAlert(`<i class="bi bi-check-circle"></i> ${response.message || 'Application successfully withdrawn.'}`, 'success');
+    
+    // Update the application in the local state
+    const appIndex = applicantDashboardState.applications.findIndex(app => app.applicationId === applicationId);
+    if (appIndex !== -1) {
+      applicantDashboardState.applications[appIndex].status = 'Withdrawn';
+      
+      // Update the UI
+      const summary = calculateSummary(applicantDashboardState.applications);
+      renderApplicantStatusCards(summary);
+      renderApplicantApplications(applicantDashboardState.applications);
+    }
+  } else {
+    // Show error message
+    showApplicantDashboardAlert(`<i class="bi bi-exclamation-triangle"></i> ${response.error || 'Failed to withdraw application.'}`, 'danger');
+  }
+}
+
+function handleWithdrawalError(error, button, originalText) {
+  // Reset button state
+  button.innerHTML = originalText;
+  button.disabled = false;
+  
+  // Show error message in the modal
+  const modalContent = document.getElementById('applicationDetailsContent');
+  modalContent.innerHTML += `
+    <div class="alert alert-danger mt-3">
+      <i class="bi bi-exclamation-triangle"></i>
+      Failed to withdraw application: ${error.message || error}
+    </div>
+  `;
+}
+
+// Helper function to recalculate summary after withdrawal
+function calculateSummary(applications) {
+  const summary = {
+    total: applications.length,
+    pending: 0,
+    shortlisted: 0,
+    interviewed: 0,
+    rejected: 0,
+    offered: 0,
+    withdrawn: 0
+  };
+  
+  // Count applications by status
+  applications.forEach(app => {
+    const status = (app.status || '').toLowerCase();
+    if (status === 'pending') summary.pending++;
+    else if (status === 'shortlisted') summary.shortlisted++;
+    else if (status === 'interviewed') summary.interviewed++;
+    else if (status === 'rejected') summary.rejected++;
+    else if (status === 'offered') summary.offered++;
+    else if (status === 'withdrawn') summary.withdrawn++;
+  });
+  
+  return summary;
+}
+
+// Initialize the dashboard when the page loads
+document.addEventListener('DOMContentLoaded', function() {
+  // If we're on the applicant dashboard page, load it
+  if (document.getElementById('applicantDashboard') && 
+      window.user && 
+      window.user.role === 'Applicant') {
+    showApplicantDashboard();
+  }
+});
+
+
+
+// sheet layout structure
+My existing sheets and their layouts:
+Users (Email    Password    Name    Role    Department    AccountStatus    LastLogin)
+Jobs (JobID    Title    Department    Description    Requirements    Responsibilities    SalaryRange    ApplicationDeadline    Status    CreationDate    LastModified    PostedBy    FolderID)
+Applications (ApplicationID    JobID    ApplicantEmail    SubmissionDate    Status    Rating    LastUpdated    LoginEmail)
+Applicants (Timestamp    ApplicationID    VacancyPost    VacancyNo    Ministry    StateDepartment    FullName    Title    DateOfBirth    IDNumber    PINNumber    Gender    Nationality    Ethnicity    HomeCounty    SubCounty    Constituency    PostalAddress    PostalCode    TownCity    Telephone    Mobile    Email    AltContactPerson    AltContactTelephone    DisabilityStatus    DisabilityDetails    DisabilityRegNo    DisabilityRegDate    CurrentEmploymentType    CurrentMinistry    Station    EmploymentNo    PresentPost    JobGroup    CurrentAppointmentDate    UpgradedPost    PreviousAppointmentDate    OnSecondment    SecondmentOrganization    SecondmentDesignation    SecondmentJobGroup    TermsOfService    OtherTerms    CurrentEmployer    PositionHeld    EffectiveDate    GrossSalary    CriminalConviction    CriminalDetails    DismissedFromEmployment    DismissalDetails    DismissalDate    CurrentDuties    SkillsExperience    DeclarationDate    DeclarationSignature    Status    Notes)
+AcademicQualifications (ApplicationID    YearFrom    YearTo    Institution    Award    CourseProgramme    Specialization    ClassGrade)
+ProfessionalQualifications (ApplicationID    YearFrom    YearTo    Institution    Award    Specialization    ClassGrade)
+TrainingCourses (ApplicationID    Year    Institution    CourseName    Duration)
+ProfessionalMemberships (ApplicationID    ProfessionalBody    MembershipNo    MembershipType    RenewalDate)
+EmploymentHistory (ApplicationID    YearFrom    YearTo    Designation    JobGroup    GrossSalary    MinistryInstitution)
+Referees (ApplicationID    RefereeNumber    FullName    Occupation    Address    PostalCode    CityTown    MobileNo    Email    PeriodKnown)
+Shortlisted(ApplicationID FullName VacancyPost Ministry Email Mobile Rating ShortlistedDate Notes)
+SystemSettings(SettingKey	 SettingValue	 DataType	Description	LastModified	ModifiedBy	primarySenderEmail	primarySenderName	emailSignature	maxBulkRecipients	emailFooterText)
+EmailTemplates(TemplateID	Name	Subject	Body	Category	CreatedBy	CreatedDate	LastModified	ModifiedBy	IsDefault)
+MessageHistory(MessageID	SendDate	Subject	Type	SenderEmail	Recipients	TemplateID	Status	ErrorCount	SentBy	JobID	AdditionalData)
+MessageRecipients(MessageID	RecipientEmail	RecipientName	ApplicationID	Status	ErrorDetails	OpenedDate	ClickedDate)
+AuditLog(Timestamp	UserEmail	Action	Details	IPAddress	UserAgent)
+the last column in sheet Applications is LoginEmail and this is the same as first column Email in sheet Users
+
+
+
+// other important functions in backend
+
+function getSpreadsheet() {
+  // Retrieve the spreadsheet ID from script properties
+  var spreadsheetId = PropertiesService.getScriptProperties().getProperty("SPREADSHEET_ID");
+
+  if (!spreadsheetId) {
+    throw new Error("Spreadsheet ID not found. Please run initializeDatabase() first.");
+  }
+
+  // Open the spreadsheet
+  return SpreadsheetApp.openById(spreadsheetId);
+}
+
+
+function getSheetData(sheetName) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(sheetName);
+  return sheet.getDataRange().getValues();
+}
+
+
+in this applicant dashboard implementation i wanted to link emails in applications sheet Applicant email and login email so that even if an applicant used a different email in application form and uses a different one also to login they can still see their application in dashboard.
+
+// frontend
+// User Authentication & Navigation Functions
+function handleLoginSuccess(userData) {
+  if (!userData || !userData.success) {
+    showMessage('Login failed: ' + (userData?.message || 'Unknown error'), 'danger');
+    return;
+  }
+  
+  // Store user data in window object and session storage
+  window.user = {
+    email: userData.email,
+    name: userData.name,
+    role: userData.role,
+    isAdmin: ['Admin', 'HR'].includes(userData.role),
+    lastLogin: new Date().toISOString()
+  };
+  
+  // Also store in session storage for persistence
+  sessionStorage.setItem('currentUser', JSON.stringify(window.user));
+  
+  // Update UI elements
+  updateUIForLoggedInUser(window.user);
+  
+  // Route to appropriate dashboard
+  if (window.user.isAdmin) {
+    showAdminDashboard();
+  } else {
+    showApplicantDashboard();
+  }
+  
+  // Show success message
+  showMessage(`Welcome back, ${window.user.name}!`, 'success');
+}
